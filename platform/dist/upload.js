@@ -1,0 +1,22 @@
+let uploadPending=null;
+try{uploadPending=JSON.parse(sessionStorage.getItem('uploadSubmission')||'null')}catch{}
+function uploadPage(){
+ current=null;
+ const previous=window.pendingUploadInputs||uploadPending?.inputs||{};window.pendingUploadInputs=null;
+ $('#main').innerHTML=`<div class="eyebrow">UPLOAD & REVIEW</div><h1>已有海报，直接审核</h1><p class="lead">上传成图，识别宣传风险并获取法规依据与修改建议。原图不会被自动修改。</p><div class="layout"><section class="card"><div class="section-head"><h2>上传海报</h2><span class="quiet">单张图片 · 最大 5 MB</span></div><div id="upload-error"></div><form id="upload-form"><div class="field"><label for="poster-file">海报图片<span class="required">*</span></label><div class="upload-drop"><span class="upload-icon">↑</span><strong>选择需要审核的海报</strong><p>PNG、JPG 或 WebP，最多 2000 万像素</p><input type="file" id="poster-file" accept="image/png,image/jpeg,image/webp" required><div id="upload-preview"></div></div><p class="hint">请上传完整、清晰的原图，确保小字和免责声明可辨认。</p></div><div class="field"><label for="upload-name">任务名称 <span class="quiet">选填</span></label><input id="upload-name" maxlength="5000" placeholder="例如：新品上市宣传海报" value="${esc(previous.product_name||'')}"></div><div class="field"><label for="upload-facts">产品事实与证明说明 <span class="quiet">选填</span></label><textarea id="upload-facts" maxlength="5000" placeholder="补充产品类别、真实规格，以及海报中的数据、认证或功效依据。">${esc(previous.product_facts||'')}</textarea><p class="hint">未提供依据的宣传不会被默认认定为真实；必要时会转人工核实。</p></div><div class="form-bottom"><span class="quiet">仅审核原图，不触发生图</span><button class="btn primary" id="upload-submit" type="submit">开始审核 →</button></div></form></section><div class="right-col"><section class="card"><h2>审核你上传的实际画面</h2><ol class="flow"><li><strong>上传并保留原图</strong><small>支持文字、产品、人物和标识混合海报</small></li><li><strong>识别文字与视觉内容</strong><small>覆盖小字、数据和画面暗示</small></li><li><strong>返回风险与依据</strong><small>逐项说明问题及修改建议</small></li></ol><div class="note"><strong>发现风险之后</strong>按报告修改海报后，再次上传复审。只有通过的原图才提供审核通过版下载。</div></section></div></div>`;
+ let imageData=null,fileHash=null;
+ $('#poster-file').onchange=async e=>{imageData=null;fileHash=null;$('#upload-preview').replaceChildren();$('#upload-error').replaceChildren();const file=e.target.files[0];if(!file)return;
+  if(!['image/png','image/jpeg','image/webp'].includes(file.type)||file.size>5*1024*1024){$('#upload-error').innerHTML='<p class="error-banner">请选择5MB以内的PNG、JPG或WebP图片。</p>';e.target.value='';return}
+  try{const bytes=await file.arrayBuffer();const computedHash=Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes))).map(x=>x.toString(16).padStart(2,'0')).join('');
+   const data=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=reject;reader.readAsDataURL(file)});
+   if(route()!=='upload'||e.target.files[0]!==file)return;fileHash=computedHash;imageData=data;const img=document.createElement('img');img.src=data;img.alt='待审核海报预览';$('#upload-preview').append(img);const info=document.createElement('p');info.textContent=file.name+' · '+(file.size/1024/1024).toFixed(2)+' MB';$('#upload-preview').append(info);
+  }catch{$('#upload-error').innerHTML='<p class="error-banner">无法读取图片，请重新选择。</p>'}
+ };
+ $('#upload-form').onsubmit=async e=>{e.preventDefault();if(!imageData){toast('请先选择图片并等待预览完成');return}const button=$('#upload-submit');button.disabled=true;button.textContent='正在提交…';
+ const inputs={product_name:$('#upload-name').value.trim()||'上传海报',product_facts:$('#upload-facts').value.trim()||'未提供产品事实及资质依据，不能推定相关宣传已获证明。',design_request:'仅审核上传海报，不生成或修改图片。'};
+ if(uploadPending&&(uploadPending.hash!==fileHash||JSON.stringify(uploadPending.inputs)!==JSON.stringify(inputs))){button.disabled=false;button.textContent='开始审核 →';toast('上次提交结果尚未确认，请先查看任务记录，或重新选择上次的图片重试');return}
+ uploadPending=uploadPending||{request_key:crypto.randomUUID(),inputs,hash:fileHash};sessionStorage.setItem('uploadSubmission',JSON.stringify(uploadPending));
+ try{const t=await api('/api/tasks',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:'upload',inputs,poster_data_url:imageData,request_key:uploadPending.request_key})});uploadPending=null;sessionStorage.removeItem('uploadSubmission');tasks=[t,...tasks.filter(x=>x.id!==t.id)];location.hash='task/'+t.id}
+ catch(err){if(err.status&&err.status!==409){uploadPending=null;sessionStorage.removeItem('uploadSubmission')}$('#upload-error').innerHTML=`<p class="error-banner">${esc(err.message)}</p>`;button.disabled=false;button.textContent='开始审核 →'}
+ };
+}
